@@ -33,6 +33,27 @@ pip install cached-hub            # loaders only (bring your own transformers/da
 pip install "cached-hub[hf]"      # + transformers, datasets
 ```
 
+## Supported libraries
+
+| Library                | cached-hub function                | Equivalent to                                   | Cached under `$CACHED_HUB_PATH`        | Pre-download with              |
+|------------------------|------------------------------------|-------------------------------------------------|----------------------------------------|--------------------------------|
+| transformers           | `load_hf_model(id, cls=AutoModel, **kw)`        | `cls.from_pretrained(id, **kw)`        | `huggingface/models/<id>/`             | `make_hf_model_resource`       |
+| transformers           | `load_hf_tokenizer(id, cls=AutoTokenizer, **kw)`| `cls.from_pretrained(id, **kw)`        | `huggingface/tokenizers/<id>/`         | `make_hf_tokenizer_resource`   |
+| transformers           | `load_hf_processor(id, cls=AutoProcessor, **kw)`| `cls.from_pretrained(id, **kw)`        | `huggingface/processors/<id>/`         | `make_hf_processor_resource`   |
+| datasets               | `load_hf_dataset(id, name=None, split=None, **kw)` | `datasets.load_dataset(id, name, split=split, **kw)` | `huggingface/datasets/<id>[-<name>]/<split>/` | `make_hf_dataset_resource` |
+| transformers           | `HFModel(id, tok_cls, model_cls, **kw)`         | lazy `.tokenizer` / `.model` via the two loaders above | as above                    | model + tokenizer resources    |
+| pyterrier / ir-datasets| (use `pt.get_dataset` directly)                 | `pt.get_dataset(id)`                   | pyterrier's own home (`PYTERRIER_HOME`, `IR_DATASETS_HOME`) | `make_pyterrier_dataset_resource` |
+| datamaestro            | (use `datamaestro.prepare_dataset` directly)    | `prepare_dataset(id)`                  | datamaestro's own store (`DATAMAESTRO_DIR`) | `make_datamaestro_resource` |
+
+The loaders differ from their equivalents in one way only: with
+`CACHED_HUB_PATH` set, they first look for the resource in the cache layout
+above, log where it came from, and on a miss forward to the equivalent call
+with `cache_dir=$CACHED_HUB_PATH/huggingface` added (unless you passed one), or
+raise `CacheMissError` in enforce mode. PyTerrier and datamaestro manage their
+own caches, so there is no loader for them: `cached-hub` only declares them as
+resources so that `cached-hub download` fetches everything a course needs in
+one go, and you keep calling those libraries as usual.
+
 ## In notebooks
 
 ```python
