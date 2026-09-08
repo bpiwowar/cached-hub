@@ -106,9 +106,12 @@ cached-hub download --from mycourse.resources:RESOURCES --section practical2 --o
 cached-hub download --from mycourse.resources:RESOURCES --key gpt2
 ```
 
-`--from` accepts a mapping or a zero-argument callable returning one, and can
-be repeated. Resources are identified by `(type, key)`, so a model shared by
-several practicals is downloaded once. `HF_HUB_OFFLINE` is lifted for the
+`--from MODULE:ATTR` imports `MODULE` and reads `ATTR` from it: a
+`{section: [resources]}` mapping, or a zero-argument callable returning one
+(dotted attributes such as `plugin.Course.resources` are followed). No source
+scanning is involved; `RESOURCES` above is only a naming convention. The option
+can be repeated. Resources are identified by `(type, key)`, so a model shared
+by several practicals is downloaded once. `HF_HUB_OFFLINE` is lifted for the
 duration of a download.
 
 The same helpers are available from Python (`download_resources`,

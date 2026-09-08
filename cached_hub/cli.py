@@ -1,8 +1,8 @@
 """Command line: inspect the cache, list and download declared resources.
 
-Resources are given with ``--from module:attribute``, where the attribute is a
-resource mapping (``{section: [Resource, ...]}``) or a zero-argument callable
-returning one::
+Resources are given with ``--from module:attribute``: the module is imported and
+the attribute read from it (no source scanning). It must be a resource mapping
+(``{section: [Resource, ...]}``) or a zero-argument callable returning one::
 
     cached-hub info
     cached-hub list --from llm_course.resources:RESOURCES
