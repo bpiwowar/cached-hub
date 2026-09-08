@@ -55,7 +55,7 @@ warning. Extra keyword arguments go to `from_pretrained` / `load_dataset`.
 
 | Variable             | Effect                                                                 |
 |----------------------|------------------------------------------------------------------------|
-| `CACHED_HUB_PATH`    | Root of the shared cache. Unset: everything comes from the Hub.        |
+| `CACHED_HUB_PATH`    | Root of the shared cache. Unset: the library does nothing (see below). |
 | `CACHED_HUB_ENFORCE` | If set (any value), a cache miss raises `CacheMissError` instead of falling back. |
 
 Layout under the root (`org/name` becomes `org-name`):
@@ -70,6 +70,14 @@ $CACHED_HUB_PATH/huggingface/                             HF cache_dir used for 
 
 A directory is used only when it contains the marker `.downloaded.ok`, written
 after a successful download, so a half-copied model is never picked up.
+
+**Without `CACHED_HUB_PATH`, `cached-hub` adds no caching of its own.**
+`load_hf_model("gpt2", cls, **kw)` is then exactly `cls.from_pretrained("gpt2", **kw)`,
+and `load_hf_dataset(...)` exactly `datasets.load_dataset(...)`: the usual
+HuggingFace cache (`~/.cache/huggingface`, `HF_HOME`) applies as it always does,
+and `cached-hub download` merely warms it. Notebooks can therefore import from
+`cached_hub` unconditionally and run unchanged on a laptop or on Colab; only the
+classroom machines set the variable.
 
 ## Declaring and downloading resources
 

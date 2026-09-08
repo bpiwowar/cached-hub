@@ -3,8 +3,9 @@
 Environment variables
 ---------------------
 ``CACHED_HUB_PATH``
-    Root of the shared local cache. When unset, resources are loaded from
-    their remote source (HuggingFace Hub, ...).
+    Root of the shared local cache. When unset, this library adds no caching
+    of its own: loaders forward to ``from_pretrained`` / ``load_dataset``
+    unchanged, so HuggingFace's usual cache (``~/.cache/huggingface``) applies.
 ``CACHED_HUB_ENFORCE``
     If set to any value, a cache miss raises :class:`CacheMissError` instead of
     falling back to the remote source. Useful to verify that everything a
