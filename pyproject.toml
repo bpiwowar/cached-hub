@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cached-hub"
+authors = [{ name = "Benjamin Piwowarski", email = "benjamin@piwowarski.fr" }]
+description = "Load HuggingFace models/datasets (and other course resources) from a shared local cache, falling back to the Hub; declare and pre-download them for classrooms"
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["huggingface", "cache", "teaching", "datasets", "transformers"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dynamic = ["version"]
+# No hard dependencies: transformers / datasets / pyterrier / datamaestro are
+# imported lazily, only by the functions that need them.
+dependencies = []
+
+[project.optional-dependencies]
+hf = ["transformers>=4.30", "datasets>=2.7"]
+pyterrier = ["python-terrier>=0.10"]
+datamaestro = ["datamaestro>=1.5"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+    "pre-commit>=3.5",
+]
+
+[project.scripts]
+cached-hub = "cached_hub.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/bpiwowar/cached-hub"
+Repository = "https://github.com/bpiwowar/cached-hub"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "cached_hub/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cached_hub"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "C90",    # mccabe complexity
+    "T20",    # flake8-print
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The CLI reports to stdout on purpose.
+"cached_hub/cli.py" = ["T20"]
+"tests/*" = ["T20"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
