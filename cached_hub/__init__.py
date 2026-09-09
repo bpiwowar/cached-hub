@@ -11,6 +11,10 @@ Course side (declare what to pre-download)::
 
 then ``cached-hub download --from mycourse.resources:RESOURCES``.
 
+``cached-hub scan sources/`` reads the loader calls back out of the sources, so
+that a declaration can be written from them (``--emit``) and kept honest
+(``cached-hub check sources/ --declaration mycourse/resources.py``).
+
 Configure the cache root with ``CACHED_HUB_PATH`` (see :mod:`cached_hub.config`).
 """
 
@@ -43,6 +47,13 @@ from .resources import (
     format_resources,
     merge_resources,
     select_resources,
+)
+from .scan import (
+    ScannedResource,
+    compare,
+    emit_section,
+    parse_declaration,
+    scan_paths,
 )
 
 try:
@@ -79,4 +90,10 @@ __all__ = [
     "make_hf_tokenizer_resource",
     "make_pyterrier_dataset_resource",
     "make_datamaestro_resource",
+    # scanning the sources that load them
+    "ScannedResource",
+    "compare",
+    "emit_section",
+    "parse_declaration",
+    "scan_paths",
 ]

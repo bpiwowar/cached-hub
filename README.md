@@ -137,16 +137,56 @@ cached-hub download --from mycourse.resources:RESOURCES --key gpt2
 
 `--from MODULE:ATTR` imports `MODULE` and reads `ATTR` from it: a
 `{section: [resources]}` mapping, or a zero-argument callable returning one
-(dotted attributes such as `plugin.Course.resources` are followed). No source
-scanning is involved; `RESOURCES` above is only a naming convention. The option
-can be repeated. Resources are identified by `(type, key)`, so a model shared
-by several practicals is downloaded once. `HF_HUB_OFFLINE` is lifted for the
-duration of a download.
+(dotted attributes such as `plugin.Course.resources` are followed). `RESOURCES`
+above is only a naming convention. The option can be repeated. Resources are
+identified by `(type, key)`, so a model shared by several practicals is
+downloaded once. `HF_HUB_OFFLINE` is lifted for the duration of a download.
 
 The same helpers are available from Python (`download_resources`,
 `select_resources`, `format_resources`, `merge_resources`), and any object with
 `resource_type`, `key`, `description`, `optional` and `download()` is a valid
 resource (`FunctionalResource` wraps a plain function).
+
+## Keeping the declaration honest
+
+The declaration is written by hand, so it drifts: a notebook gains a model, an
+old one stops being loaded, and the classroom cache is wrong on the morning it
+matters. `scan` reads the loader calls back out of the sources, and `check`
+compares them with the declaration:
+
+```sh
+cached-hub scan  sources/                      # what the sources load
+cached-hub scan  sources/ --emit practical2    # a declaration skeleton to fill in
+cached-hub check sources/ --declaration mycourse/resources.py   # exit 1 on drift
+```
+
+A section is a source file name (`sources/02-generation.py` -> `02-generation`),
+which is what `--section` takes. Both commands accept files or directories
+(a directory contributes its top-level `*.py`, `_`-prefixed excluded), and
+`--search-path DIR` lets an imported helper module be scanned as part of the
+file that imports it — for course code split between a notebook and a library.
+
+What the scan understands: `load_hf_model` / `load_hf_tokenizer` /
+`load_hf_processor` / `load_hf_dataset` / `HFModel` / `pt.get_dataset` /
+`prepare_dataset`, with module-level string constants resolved
+(`MODEL = "gpt2"` … `load_hf_model(MODEL, …)`). A constant rebound under a
+guard — `if test_mode:` by default, `--guard NAME` for another one — becomes an
+`optional=True` resource, since a small stand-in used while testing has no
+business filling a classroom cache. Plain `load_dataset` and
+`Class.from_pretrained` calls are reported as *bypasses*: they do not go through
+the cache, so `check` never asks for them to be declared.
+
+`check` reports as **errors** anything loaded but not declared, or declared but
+never loaded, and as **warnings** a class or `optional` mismatch. Descriptions
+and dataset *splits* are left alone: code that loads every split says nothing
+about their names.
+
+In a Makefile:
+
+```make
+check-resources:
+	cached-hub check sources/ --declaration mycourse/resources.py
+```
 
 ## Checking a cache before class
 
