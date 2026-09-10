@@ -1,11 +1,13 @@
 """Command line: inspect the cache, list, download and audit declared resources.
 
-Resources are given with ``--from module:attribute``: the module is imported and
-the attribute read from it. It must be a resource mapping
+Resources are given with ``--from module:attribute`` (or ``--from path.py``,
+which reads ``RESOURCES`` from a file that need not be importable): the module
+is imported and the attribute read from it. It must be a resource mapping
 (``{section: [Resource, ...]}``) or a zero-argument callable returning one::
 
     cached-hub info
     cached-hub list --from llm_course.resources:RESOURCES
+    cached-hub list --from src/llm_course/resources.py
     cached-hub download --from llm_course.resources:get_resources --section practical2
     cached-hub download --from llm_course.resources:RESOURCES --key gpt2
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import logging
 import sys
 from pathlib import Path
@@ -32,12 +35,47 @@ from .resources import Resources, download_resources, format_resources
 from .scan import DEFAULT_GUARDS, compare, emit_section, parse_declaration, scan_paths
 
 
-def load_resources(spec: str) -> Resources:
-    """Resolve ``module:attribute`` to a resource mapping."""
+def _import_path(path: Path) -> object:
+    """Import a ``.py`` file directly, without it being on ``sys.path``."""
+    if not path.is_file():
+        raise SystemExit(f"no such file: {path}")
+    name = f"_cached_hub_resources_{abs(hash(str(path.resolve())))}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot import {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # a bad declaration file, not our problem to fix
+        del sys.modules[name]
+        raise SystemExit(f"{path}: {exc}") from exc
+    return module
+
+
+def _split_spec(spec: str) -> Tuple[str, str]:
+    """``module:attr``, ``file.py`` or ``file.py:attr`` -> (target, attribute)."""
+    head, sep, tail = spec.rpartition(":")
+    if sep and head.endswith(".py"):
+        return head, tail  # file.py:attr
+    if spec.endswith(".py"):
+        return spec, "RESOURCES"  # file.py, attribute implied
     module_name, sep, attr_path = spec.partition(":")
     if not sep or not attr_path:
-        raise SystemExit(f"invalid resource spec {spec!r}: expected module:attribute")
-    obj = importlib.import_module(module_name)
+        raise SystemExit(
+            f"invalid resource spec {spec!r}: expected module:attribute, "
+            "path/to/resources.py, or path/to/resources.py:attribute"
+        )
+    return module_name, attr_path
+
+
+def load_resources(spec: str) -> Resources:
+    """Resolve ``module:attribute`` (or a ``.py`` path) to a resource mapping."""
+    target, attr_path = _split_spec(spec)
+    if target.endswith(".py"):
+        obj: object = _import_path(Path(target))
+    else:
+        obj = importlib.import_module(target)
     for attr in attr_path.split("."):
         obj = getattr(obj, attr)
     if callable(obj):
@@ -169,10 +207,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--from",
             dest="resources",
-            metavar="MODULE:ATTR",
+            metavar="MODULE:ATTR|FILE.py",
             action="append",
             required=True,
-            help="resource mapping or callable returning one (repeatable)",
+            help="resource mapping or callable returning one; a .py path is "
+            "imported directly, its RESOURCES read unless :ATTR says otherwise "
+            "(repeatable)",
         )
 
     p_list = sub.add_parser("list", help="list declared resources")

@@ -137,8 +137,16 @@ cached-hub download --from mycourse.resources:RESOURCES --key gpt2
 
 `--from MODULE:ATTR` imports `MODULE` and reads `ATTR` from it: a
 `{section: [resources]}` mapping, or a zero-argument callable returning one
-(dotted attributes such as `plugin.Course.resources` are followed). `RESOURCES`
-above is only a naming convention. The option can be repeated. Resources are
+(dotted attributes such as `plugin.Course.resources` are followed). A `.py`
+path works too and needs nothing on `sys.path`, which is the easy way to reach
+a declaration that lives in a course's `src/`:
+
+```sh
+cached-hub list     --from src/mycourse/resources.py            # reads RESOURCES
+cached-hub download --from src/mycourse/resources.py:get_resources
+```
+
+`RESOURCES` above is only a naming convention. The option can be repeated. Resources are
 identified by `(type, key)`, so a model shared by several practicals is
 downloaded once. `HF_HUB_OFFLINE` is lifted for the duration of a download.
 

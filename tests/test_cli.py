@@ -89,3 +89,23 @@ def test_download_section_key_optional(course):
         mod_calls().clear()
         main(["download", "--from", f"{course}:RESOURCES", "--key", "opt"])
         assert mod_calls() == ["opt"]
+
+
+def test_load_resources_from_a_file_path(tmp_path):
+    path = tmp_path / "declaration.py"
+    path.write_text(MODULE)
+    # A path is imported directly, with no need for it to be on sys.path
+    assert set(load_resources(str(path))) == {"practical1", "practical2"}
+    assert set(load_resources(f"{path}:get_resources")) == {"practical1", "practical2"}
+
+
+def test_load_resources_missing_file(tmp_path):
+    with pytest.raises(SystemExit):
+        load_resources(str(tmp_path / "absent.py"))
+
+
+def test_load_resources_file_with_a_bad_attribute(tmp_path):
+    path = tmp_path / "declaration.py"
+    path.write_text(MODULE)
+    with pytest.raises(AttributeError):
+        load_resources(f"{path}:NOPE")
