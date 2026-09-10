@@ -1,5 +1,6 @@
 """Tests for the command line interface."""
 
+import logging
 import os
 import sys
 import textwrap
@@ -109,3 +110,42 @@ def test_load_resources_file_with_a_bad_attribute(tmp_path):
     path.write_text(MODULE)
     with pytest.raises(AttributeError):
         load_resources(f"{path}:NOPE")
+
+
+BROKEN = textwrap.dedent(
+    """
+    from cached_hub import FunctionalResource
+
+    def _boom():
+        raise ImportError("needs the Torchvision library")
+
+    def _fine():
+        return "Downloaded fine"
+
+    RESOURCES = {
+        "practical1": [
+            FunctionalResource("test", "broken", "Broken", _boom),
+            FunctionalResource("test", "fine", "Fine", _fine),
+        ],
+    }
+    """
+)
+
+
+def test_download_keep_going_survives_one_bad_resource(tmp_path, capsys):
+    path = tmp_path / "broken.py"
+    path.write_text(BROKEN)
+    # Without --keep-going the exception propagates, as before
+    with pytest.raises(ImportError):
+        main(["download", "--from", str(path)])
+
+    assert main(["download", "--from", str(path), "--keep-going"]) == 1
+    out = capsys.readouterr().out
+    assert "1 resource(s) could not be downloaded" in out
+    assert "practical1/broken: needs the Torchvision library" in out
+
+
+def test_download_does_not_set_the_root_logger_to_info(tmp_path, course):
+    main(["list", "--from", f"{course}:RESOURCES"])
+    assert logging.getLogger().level == logging.WARNING
+    assert logging.getLogger("cached_hub").level == logging.INFO

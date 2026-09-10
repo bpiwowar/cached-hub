@@ -115,7 +115,7 @@ def cmd_download(args: argparse.Namespace) -> int:
     else:
         print(f"Cache location: {root}")
 
-    failures = 0
+    failed: List[Tuple[str, object, Exception]] = []
     with config.hub_online():
         for spec, resources in _load_all(args.resources):
             if args.section and args.section not in resources:
@@ -127,13 +127,22 @@ def cmd_download(args: argparse.Namespace) -> int:
                     section=args.section,
                     key=args.key,
                     include_optional=args.optional,
+                    keep_going=args.keep_going,
+                    failures=failed,
                 )
             except Exception:
                 if not args.keep_going:
                     raise
-                failures += 1
+                failed.append((spec, None, sys.exc_info()[1]))
                 logging.exception("%s: download failed", spec)
-    return 1 if failures else 0
+
+    if failed:
+        print(f"\n{len(failed)} resource(s) could not be downloaded:")
+        for section_name, resource, exc in failed:
+            name = getattr(resource, "key", section_name)
+            print(f"  - {section_name}/{name}: {exc}")
+        return 1
+    return 0
 
 
 def _scan(args: argparse.Namespace):
@@ -284,9 +293,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    # Only our own logger talks at INFO: setting the root logger there as well
+    # turned every HTTP request huggingface_hub makes into a line of output.
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s:%(name)s:%(message)s",
+    )
+    logging.getLogger("cached_hub").setLevel(
+        logging.DEBUG if args.verbose else logging.INFO
     )
     return args.func(args)
 

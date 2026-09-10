@@ -150,11 +150,17 @@ def download_resources(
     section: Optional[str] = None,
     key: Optional[str] = None,
     include_optional: bool = False,
+    keep_going: bool = False,
+    failures: Optional[List[Tuple[str, Resource, Exception]]] = None,
 ) -> List[Tuple[str, Resource, str]]:
     """Download the selected resources (see :func:`select_resources`).
 
-    Returns ``(section, resource, status)`` triples, one per downloaded
-    resource. Exceptions from ``download()`` propagate.
+    Returns ``(section, resource, status)`` triples, one per resource that was
+    downloaded. Exceptions from ``download()`` propagate, unless ``keep_going``
+    is set: the remaining resources are then still attempted, and each failure
+    is logged and appended to ``failures`` as ``(section, resource, exception)``
+    — filling a cache for a classroom should not stop at the one model whose
+    extra dependency is missing.
     """
     results = []
     for section_name, resource in select_resources(
@@ -163,7 +169,16 @@ def download_resources(
         logger.info(
             "Downloading %s/%s: %s", section_name, resource.key, resource.description
         )
-        status = resource.download()
+        try:
+            status = resource.download()
+        except Exception as exc:
+            if not keep_going:
+                raise
+            logger.error("  -> FAILED %s/%s: %s", section_name, resource.key, exc)
+            logger.debug("traceback", exc_info=True)
+            if failures is not None:
+                failures.append((section_name, resource, exc))
+            continue
         if status:
             logger.info("  -> %s", status)
         results.append((section_name, resource, status))
