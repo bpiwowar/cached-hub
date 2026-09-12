@@ -16,6 +16,10 @@ that a declaration can be written from them (``--emit``) and kept honest
 (``cached-hub check sources/ --declaration mycourse/resources.py``).
 
 Configure the cache root with ``CACHED_HUB_PATH`` (see :mod:`cached_hub.config`).
+
+:class:`Profile` is the base for a course's compute ladder (see
+:mod:`cached_hub.profile`); the scanner reads ``Profile.pick(...)`` calls to
+learn which of several models a notebook may load.
 """
 
 from .config import (
@@ -37,6 +41,7 @@ from .hf import (
     make_hf_processor_resource,
     make_hf_tokenizer_resource,
 )
+from .profile import ENV_PROFILE, Profile, current_ladder
 from .pyterrier import make_pyterrier_dataset_resource
 from .resources import (
     DownloadableResource,
@@ -69,6 +74,10 @@ __all__ = [
     "CacheMissError",
     "get_cache_path",
     "is_enforce_mode",
+    # profiles
+    "ENV_PROFILE",
+    "Profile",
+    "current_ladder",
     # loading
     "HFModel",
     "load_hf_dataset",

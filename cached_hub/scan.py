@@ -23,6 +23,23 @@ A constant rebound under a guard (``if test_mode:`` by default, see
 course swaps in when testing, and it has no business being downloaded for a
 classroom.
 
+A :class:`~cached_hub.profile.Profile` ladder says the same thing in one
+expression, and is read the same way::
+
+    class Profile(BaseProfile):
+        FAST_TEST = 0
+        SMALL = 1
+        LOW_GPU = 2
+
+    MODEL = Profile.pick(fast_test="…/SmolLM2-135M", low_gpu="Qwen/…-1.5B")
+
+The ``class X(Profile)`` statement is what gives the rung names and their
+order, so a ladder is understood without importing anything. Of the models a
+``pick`` may return, the largest rung's is required — it is what the ladder
+resolves to when nothing selects a profile — and the smaller ones are
+optional. A positional default plays the largest rung's part, so when one is
+given every keyword rung is optional.
+
 What a scan cannot know is left to the human: descriptions, and the dataset
 *splits* — code that loads every split says nothing about their names. Splits
 are reported, never compared.
@@ -130,11 +147,51 @@ class _Constants:
 
     guards: Tuple[str, ...] = DEFAULT_GUARDS
     values: Dict[str, List[Tuple[object, bool]]] = field(default_factory=dict)
+    #: Ladder class name -> ``{RUNG_NAME: rank}``, from ``class X(Profile)``.
+    ladders: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     def add(self, name: str, value: object, optional: bool) -> None:
         entries = self.values.setdefault(name, [])
         if all(existing != value for existing, _ in entries):
             entries.append((value, optional))
+
+    def pick_values(self, node: ast.expr) -> List[Tuple[object, bool]]:
+        """Every value a ``<Ladder>.pick(...)`` call may yield.
+
+        The largest rung mentioned is what the ladder resolves to when nothing
+        selects a profile, so it is the one a full run needs and comes out
+        required; the smaller rungs are stand-ins and come out optional. A
+        positional default stands for every unspecified rung, the largest
+        included, so it is required too — and then no keyword rung is.
+        """
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            return []
+        if node.func.attr != "pick":
+            return []
+        rungs = self.ladders.get(_func_name(node.func.value))
+        if not rungs:
+            return []
+
+        ranked: List[Tuple[int, object]] = []
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                continue
+            rank = rungs.get(_normalise_rung(keyword.arg))
+            value = _literal(keyword.value)
+            if rank is not None and value is not None:
+                ranked.append((rank, value))
+        if not ranked:
+            return []
+
+        out: List[Tuple[object, bool]] = []
+        for default in node.args[:1]:
+            value = _literal(default)
+            if value is not None:
+                out.append((value, False))
+        largest = max(rank for rank, _ in ranked)
+        for rank, value in sorted(ranked, key=lambda item: -item[0]):
+            out.append((value, bool(out) or rank < largest))
+        return out
 
     def resolve(self, node: ast.expr) -> List[Tuple[object, bool]]:
         """Every value ``node`` may take, each with its ``optional`` flag."""
@@ -142,6 +199,8 @@ class _Constants:
             return [(node.value, False)]
         if isinstance(node, ast.Name):
             return list(self.values.get(node.id, []))
+        if isinstance(node, ast.Call):
+            return self.pick_values(node)
         if isinstance(node, (ast.List, ast.Tuple)):
             items = [self.resolve(elt) for elt in node.elts]
             if not items or any(not item for item in items):
@@ -172,8 +231,80 @@ def _literal(node: ast.expr) -> Optional[object]:
     return None
 
 
-def _collect_constants(tree: ast.AST, guards: Sequence[str]) -> _Constants:
+def _normalise_rung(name: str) -> str:
+    """``fast_test`` / ``fast-test`` -> ``FAST_TEST``, as :mod:`cached_hub.profile`."""
+    return name.strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _profile_base_aliases(tree: ast.AST) -> set:
+    """Names under which :class:`cached_hub.Profile` was imported.
+
+    ``from cached_hub import Profile as BaseProfile`` yields ``{"BaseProfile"}``,
+    so the ``class Profile(BaseProfile)`` below it is recognised as a ladder
+    even though it shadows the imported name.
+    """
+    aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module in ("cached_hub", "cached_hub.profile"):
+                for alias in node.names:
+                    if alias.name == "Profile":
+                        aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "cached_hub" and alias.asname is None:
+                    aliases.add("cached_hub.Profile")
+    return aliases
+
+
+def _collect_ladders(tree: ast.AST) -> Dict[str, Dict[str, int]]:
+    """``{ladder class name: {RUNG: rank}}`` for every ``class X(Profile)``.
+
+    Read straight off the class statement, so a ladder is understood without
+    importing the module that declares it — the reason :class:`Profile` lives
+    in this package rather than in each course.
+    """
+    aliases = _profile_base_aliases(tree)
+    ladders: Dict[str, Dict[str, int]] = {}
+    if not aliases:
+        return ladders
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = set()
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                bases.add(base.id)
+            elif isinstance(base, ast.Attribute):
+                bases.add(f"{_func_name(base.value)}.{base.attr}")
+        if not bases & aliases:
+            continue
+        rungs: Dict[str, int] = {}
+        for statement in node.body:
+            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                continue
+            target = statement.targets[0]
+            value = statement.value
+            if isinstance(target, ast.Name) and isinstance(value, ast.Constant):
+                if isinstance(value.value, int):
+                    rungs[_normalise_rung(target.id)] = value.value
+        if rungs:
+            ladders[node.name] = rungs
+    return ladders
+
+
+def _collect_constants(
+    tree: ast.AST,
+    guards: Sequence[str],
+    *,
+    ladders: Optional[Dict[str, Dict[str, int]]] = None,
+) -> _Constants:
     constants = _Constants(tuple(guards))
+    # Ladders have to be in place *before* the walk: resolving `X.pick(...)` on
+    # the right-hand side of an assignment happens during it.
+    constants.ladders = dict(ladders or {})
+    constants.ladders.update(_collect_ladders(tree))
 
     def guarded(test: ast.expr) -> bool:
         if isinstance(test, ast.Name):
@@ -189,6 +320,12 @@ def _collect_constants(tree: ast.AST, guards: Sequence[str]) -> _Constants:
                 value = _literal(node.value)
                 if value is not None:
                     constants.add(target.id, value, under_guard)
+                else:
+                    # `MODEL = Profile.pick(low_gpu="…", small="…")`: every rung
+                    # is a model this notebook may load, the smaller ones only
+                    # when someone asks for a smaller profile.
+                    for picked, optional in constants.pick_values(node.value):
+                        constants.add(target.id, picked, under_guard or optional)
         if isinstance(node, ast.If):
             # `if test_mode:` swaps in a stand-in; `else` stays on the main path
             for stmt in node.body:
@@ -355,12 +492,25 @@ class _Scanner(ast.NodeVisitor):
             self._add(ScannedResource("pyterrier", value))
 
 
+def _parse(path: Path) -> ast.AST:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
 def scan_file(
-    path: Path, guards: Sequence[str] = DEFAULT_GUARDS
+    path: Path,
+    guards: Sequence[str] = DEFAULT_GUARDS,
+    *,
+    ladders: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Tuple[List[ScannedResource], List[str]]:
-    """Resources loaded by one file, and the modules it imports."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    scanner = _Scanner(_collect_constants(tree, guards))
+    """Resources loaded by one file, and the modules it imports.
+
+    ``ladders`` adds profile ladders declared elsewhere — a course usually
+    declares one in a helper module and uses it in the notebooks that import it,
+    so the rung names have to come in from outside the file being scanned.
+    """
+    tree = _parse(path)
+    constants = _collect_constants(tree, guards, ladders=ladders)
+    scanner = _Scanner(constants)
     scanner.visit(tree)
     return scanner.resources, scanner.imports
 
@@ -375,6 +525,32 @@ def _module_file(module: str, search_paths: Sequence[Path]) -> Optional[Path]:
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _related_files(source: Path, search_paths: Sequence[Path]) -> List[Path]:
+    """``source`` plus every module it imports, transitively, under the roots."""
+    files = [source]
+    pending = _module_imports(_parse(source))
+    seen = set()
+    while pending:
+        module = pending.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        helper = _module_file(module, search_paths)
+        if helper is None or helper in files:
+            continue
+        files.append(helper)
+        pending.extend(_module_imports(_parse(helper)))
+    return files
+
+
+def _module_imports(tree: ast.AST) -> List[str]:
+    return [
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0
+    ]
 
 
 def scan_paths(
@@ -400,19 +576,19 @@ def scan_paths(
 
     scanned: Dict[str, List[ScannedResource]] = {}
     for source in sources:
-        resources, imports = scan_file(source, guards)
-        seen = set()
-        while imports:
-            module = imports.pop()
-            if module in seen:
-                continue
-            seen.add(module)
-            helper = _module_file(module, search_paths)
-            if helper is None or helper == source:
-                continue
-            more, more_imports = scan_file(helper, guards)
+        related = _related_files(source, search_paths)
+        # Pool the ladders over the whole import graph first: the `class
+        # X(Profile)` statement is typically in a helper module while the
+        # `X.pick(...)` calls are in the notebook that imports it, and neither
+        # file can be understood alone.
+        ladders: Dict[str, Dict[str, int]] = {}
+        for path in related:
+            ladders.update(_collect_ladders(_parse(path)))
+
+        resources: List[ScannedResource] = []
+        for path in related:
+            more, _ = scan_file(path, guards, ladders=ladders)
             resources.extend(more)
-            imports.extend(more_imports)
         scanned[source.stem] = _dedup(resources)
     return scanned
 

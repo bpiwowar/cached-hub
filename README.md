@@ -61,12 +61,14 @@ from cached_hub import load_hf_model, load_hf_tokenizer, load_hf_dataset, HFMode
 from transformers import AutoModelForCausalLM
 
 tokenizer = load_hf_tokenizer("HuggingFaceTB/SmolLM2-1.7B-Instruct")
-model = load_hf_model("HuggingFaceTB/SmolLM2-1.7B-Instruct", AutoModelForCausalLM, device_map="auto")
+model = load_hf_model(
+    "HuggingFaceTB/SmolLM2-1.7B-Instruct", AutoModelForCausalLM, device_map="auto"
+)
 train = load_hf_dataset("imdb", split="train")
-sst2 = load_hf_dataset("glue", name="sst2")          # DatasetDict of the cached splits
+sst2 = load_hf_dataset("glue", name="sst2")  # DatasetDict of the cached splits
 
-hf = HFModel("gpt2")            # lazy: nothing is loaded yet
-hf.tokenizer, hf.model          # AutoTokenizer / AutoModel, loaded on first access
+hf = HFModel("gpt2")  # lazy: nothing is loaded yet
+hf.tokenizer, hf.model  # AutoTokenizer / AutoModel, loaded on first access
 ```
 
 Each loader checks the local cache first, then falls back to the Hub with a
@@ -107,8 +109,12 @@ A course lists what it needs as `{section: [resources]}`:
 ```python
 # mycourse/resources.py
 from cached_hub import (
-    make_hf_model_resource, make_hf_tokenizer_resource, make_hf_processor_resource,
-    make_hf_dataset_resource, make_pyterrier_dataset_resource, make_datamaestro_resource,
+    make_hf_model_resource,
+    make_hf_tokenizer_resource,
+    make_hf_processor_resource,
+    make_hf_dataset_resource,
+    make_pyterrier_dataset_resource,
+    make_datamaestro_resource,
 )
 
 RESOURCES = {
@@ -118,8 +124,14 @@ RESOURCES = {
         make_hf_dataset_resource("imdb", ["train", "test"]),
     ],
     "practical2": [
-        make_hf_model_resource("Qwen/Qwen2.5-7B-Instruct", model_class="AutoModelForCausalLM", optional=True),
-        make_pyterrier_dataset_resource("irds:lotte/technology/dev/search", "LoTTE technology"),
+        make_hf_model_resource(
+            "Qwen/Qwen2.5-7B-Instruct",
+            model_class="AutoModelForCausalLM",
+            optional=True,
+        ),
+        make_pyterrier_dataset_resource(
+            "irds:lotte/technology/dev/search", "LoTTE technology"
+        ),
     ],
 }
 ```
@@ -155,6 +167,58 @@ The same helpers are available from Python (`download_resources`,
 `resource_type`, `key`, `description`, `optional` and `download()` is a valid
 resource (`FunctionalResource` wraps a plain function).
 
+## Compute profiles
+
+How much compute a notebook should spend is a choice a reader makes — a smoke
+test on a laptop, a full run on an A100 — and it is separate from what the
+machine offers (CUDA or MPS, which dtype, whether `bitsandbytes` imports).
+`Profile` covers the first question only.
+
+The ladder is course material, not library material, so each course declares
+its own rungs by subclassing:
+
+```python
+from cached_hub import Profile as BaseProfile
+
+
+class Profile(BaseProfile):
+    FAST_TEST = 0
+    SMALL = 1
+    LOW_GPU = 2
+    HIGH_GPU = 3
+```
+
+Notebooks then size themselves with `pick`:
+
+```python
+MODEL_NAME = Profile.pick(
+    fast_test="HuggingFaceTB/SmolLM2-135M-Instruct",
+    small="Qwen/Qwen2.5-0.5B-Instruct",
+    low_gpu="Qwen/Qwen2.5-1.5B-Instruct",
+)
+n_queries = Profile.pick(200, fast_test=8, small=40)
+```
+
+`pick` resolves when it is called, never at import, so changing profile and
+re-running a cell does what it looks like it does. A rung with no value of its
+own takes the nearest one below it — above, if there is nothing below — and a
+positional default stands for every rung left unspecified. Rungs are ordered,
+so `Profile.current() >= Profile.LOW_GPU` is the way to gate a section.
+
+`NOTEBOOK_PROFILE` gives the starting rung by name (`fast-test`, `FAST_TEST`
+and `fast gpu` are all read the same way); `Profile.set(...)` still wins
+afterwards, and `Profile.select()` shows an `ipywidgets` chooser in a notebook.
+Set `NOTEBOOK_PROFILE_WIDGET=0` to suppress it. Detecting the machine is
+somebody else's job: whoever does it calls `Profile.set_detected(...)`, or a
+course overrides `detect(hardware)` to map its own hardware to a rung.
+
+Keeping `Profile` here, rather than in each course, is what lets `scan` read a
+ladder without importing anything: it finds the `class X(Profile)` statement,
+learns the rung names and their order from it, and resolves every `X.pick(...)`
+call into the models it may load. Of those, the largest rung is required — it
+is what the ladder resolves to when nothing selects a profile — and the smaller
+ones come out `optional=True`.
+
 ## Keeping the declaration honest
 
 The declaration is written by hand, so it drifts: a notebook gains a model, an
@@ -180,7 +244,8 @@ What the scan understands: `load_hf_model` / `load_hf_tokenizer` /
 (`MODEL = "gpt2"` … `load_hf_model(MODEL, …)`). A constant rebound under a
 guard — `if test_mode:` by default, `--guard NAME` for another one — becomes an
 `optional=True` resource, since a small stand-in used while testing has no
-business filling a classroom cache. Plain `load_dataset` and
+business filling a classroom cache. A profile ladder (below) says the same
+thing in one expression and is read the same way. Plain `load_dataset` and
 `Class.from_pretrained` calls are reported as *bypasses*: they do not go through
 the cache, so `check` never asks for them to be declared.
 
