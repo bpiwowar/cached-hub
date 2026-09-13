@@ -11,6 +11,11 @@ Course side (declare what to pre-download)::
 
 then ``cached-hub download --from mycourse.resources:RESOURCES``.
 
+For course data that is not a HuggingFace model/dataset (a tarball published
+on a course web server, say), use :func:`cached_download` instead -- same
+``CACHED_HUB_PATH`` root and cache-miss policy, with a plain relative-path
+layout rather than the HuggingFace one.
+
 ``cached-hub scan sources/`` reads the loader calls back out of the sources, so
 that a declaration can be written from them (``--emit``) and kept honest
 (``cached-hub check sources/ --declaration mycourse/resources.py``).
@@ -60,6 +65,7 @@ from .scan import (
     parse_declaration,
     scan_paths,
 )
+from .web import cached_download
 
 try:
     from ._version import __version__
@@ -105,4 +111,6 @@ __all__ = [
     "emit_section",
     "parse_declaration",
     "scan_paths",
+    # generic URL/archive caching
+    "cached_download",
 ]
