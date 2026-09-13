@@ -122,6 +122,35 @@ def test_cache_miss_is_visible_by_default(tmp_path, monkeypatch, caplog):
     assert "llm/thing" in caplog.text and ENV_PATH in caplog.text
 
 
+def test_interrupted_archive_download_is_not_left_behind(tmp_path):
+    """A download that dies partway through (network error, ^C, kill) must not
+    leave a file at the expected archive path -- otherwise the next call sees
+    `archive.exists()` and reuses the truncated file forever instead of
+    retrying, which is exactly how a corrupted .tar.gz used to get stuck in
+    the cache."""
+
+    def _dies_after_writing_garbage(url, dest):
+        dest.write_bytes(b"not a valid gzip stream")
+        raise ConnectionError("connection reset")
+
+    with patch.dict(os.environ, {ENV_PATH: str(tmp_path)}, clear=True):
+        with patch(
+            "cached_hub.web.urlretrieve", side_effect=_dies_after_writing_garbage
+        ):
+            with pytest.raises(ConnectionError):
+                cached_download(URL, "llm/thing")
+
+    archive = tmp_path / "custom" / "llm" / "thing.tar.gz"
+    assert not archive.exists()
+    assert list(archive.parent.glob(".thing.tar.gz.*")) == []
+
+    # A retry with a working download now succeeds instead of reusing garbage.
+    with patch.dict(os.environ, {ENV_PATH: str(tmp_path)}, clear=True):
+        with patch("cached_hub.web.urlretrieve", side_effect=_fake_urlretrieve()):
+            path = cached_download(URL, "llm/thing")
+    assert (path / "data.txt").read_text() == "hello"
+
+
 def test_enforce_mode_raises_instead_of_downloading(tmp_path):
     env = {ENV_PATH: str(tmp_path), ENV_ENFORCE: "1"}
     with patch.dict(os.environ, env, clear=True):

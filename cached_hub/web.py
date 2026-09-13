@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import getpass
 import logging
+import os
 import tarfile
 import tempfile
 from pathlib import Path
@@ -61,6 +62,27 @@ def _is_writable(directory: Path) -> bool:
         return False
 
 
+def _download_to(url: str, dest: Path) -> None:
+    """Download ``url`` into a temp file next to ``dest``, then move it into place.
+
+    ``urlretrieve`` writing straight to ``dest`` would leave a truncated file
+    there if the download is interrupted (network error, ^C, killed process)
+    -- and callers treat ``dest.exists()`` as "already downloaded", so a
+    partial file gets silently reused forever afterwards instead of retried.
+    Downloading to a sibling temp file and renaming only on success means a
+    half-finished download never appears at the name callers check.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        urlretrieve(url, tmp_path)
+        tmp_path.replace(dest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def _fetch(url: str, dest: Path) -> Path:
     """Download ``url`` to ``dest``, extracting a ``.tar.gz``/``.tgz`` archive.
 
@@ -74,7 +96,7 @@ def _fetch(url: str, dest: Path) -> Path:
         archive = dest.with_suffix(".tar.gz")
         downloaded = not archive.exists()
         if downloaded:
-            urlretrieve(url, archive)
+            _download_to(url, archive)
         else:
             logger.info("Using existing archive %s", archive)
         with tarfile.open(archive, "r:gz") as tar:
@@ -83,7 +105,7 @@ def _fetch(url: str, dest: Path) -> Path:
             archive.unlink()
         mark_download_complete(dest)
     else:
-        urlretrieve(url, dest)
+        _download_to(url, dest)
     return dest
 
 
